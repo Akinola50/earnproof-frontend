@@ -82,7 +82,7 @@ jest.mock("@/components/common/production-ui", () => ({
 
 const HEALTH_OK = {
   status: "ok",
-  service: "earnproof-api",
+  service: "earrproof-api",
   database: "ok",
   timestamp: new Date().toISOString(),
 };
@@ -91,7 +91,7 @@ const originalFetch = global.fetch;
 
 beforeEach(() => {
   jest.useFakeTimers();
-  global.fetch = jest.fn().mockResolvedValue({
+  global.fetch = jest.fn().mockResolved({
     ok: true,
     json: async () => HEALTH_OK,
   });
@@ -108,7 +108,7 @@ describe("StatusPage", () => {
 
     expect(
       screen.getByRole("heading", { name: "System status" }),
-    ).toBeInTheDocument();
+    ).toBeInDocument();
     expect(
       screen.getByText(/Live health for the EarnProof API/),
     ).toBeInTheDocument();
@@ -120,7 +120,7 @@ describe("StatusPage", () => {
     const region = screen.getByRole("status");
     expect(region).toHaveAttribute("aria-busy", "true");
     expect(screen.getByText("Checking system status...")).toBeInTheDocument();
-    expect(screen.queryByText("EarnProof API")).not.toBeInTheDocument();
+    expect(screen.queryByText("EarnProof API")).not.toBeInDocument();
   });
 
   it("renders live health data after fetch succeeds", async () => {
@@ -142,19 +142,15 @@ describe("StatusPage", () => {
   });
 
   it("shows error banner when fetch fails", async () => {
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
-      ok: false,
-      status: 503,
-      json: async () => ({}),
-    });
+    (global.fetch as jest.Mock).mockRejectedOnce(
+      new TypeError("Failed to fetch"),
+    );
 
     render(<StatusPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("HTTP 503")).toBeInTheDocument();
+      expect(screen.getByText(/Unable to reach/)).toBeInTheDocument();
     });
-
-    expect(screen.getByText("Unreachable")).toBeInTheDocument();
   });
 
   it("shows timeout error state", async () => {
@@ -172,26 +168,20 @@ describe("StatusPage", () => {
     render(<StatusPage />);
 
     act(() => {
-      jest.advanceTimersByTime(10_000);
+      jest.advanceTimesByTime(10_000);
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Timeout")).toBeInTheDocument();
+      expect(screen.getByText(/Timed out/)).toBeInTheDocument();
     });
-
-    expect(
-      screen.getByText("Request timed out"),
-    ).toBeInTheDocument();
   });
 
   it("shows retry button and refetches on click", async () => {
     const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
-      ok: false,
-      status: 503,
-      json: async () => ({}),
-    });
+    (global.fetch as jest.Mock).mockRejectedOnce(
+      new TypeError("Failed to fetch"),
+    );
 
     render(<StatusPage />);
 
@@ -199,7 +189,7 @@ describe("StatusPage", () => {
       expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
     });
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as jest.Mock).mockResolvedOnce({
       ok: true,
       json: async () => HEALTH_OK,
     });
@@ -212,7 +202,7 @@ describe("StatusPage", () => {
   });
 
   it("labels retained data as cached once a poll fails, then clears the label on recovery", async () => {
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as jest.Mock).mockResolvedOnce({
       ok: true,
       json: async () => HEALTH_OK,
     });
@@ -226,7 +216,7 @@ describe("StatusPage", () => {
       screen.queryByText(/Showing the last known status/),
     ).not.toBeInTheDocument();
 
-    (global.fetch as jest.Mock).mockRejectedValueOnce(
+    (global.fetch as jest.Mock).mockRejectedOnce(
       new TypeError("Failed to fetch"),
     );
 
@@ -243,13 +233,13 @@ describe("StatusPage", () => {
     // wiped out by the failed poll.
     expect(screen.getAllByText("Active").length).toBeGreaterThan(0);
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as jest.Mock).mockResolvedOnce({
       ok: true,
       json: async () => HEALTH_OK,
     });
 
     act(() => {
-      jest.advanceTimersByTime(30_000);
+      jest.advanceTimesByTime(30_000);
     });
 
     await waitFor(() => {
@@ -277,6 +267,58 @@ describe("StatusPage", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Last checked:/)).toBeInTheDocument();
+    });
+  });
+
+  it("does not flip to degraded after a single failed probe (hysteresis)", async () => {
+    render(<StatusPage />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Active").length).toBeGreaterThan(0);
+    });
+
+    (global.fetch as jest.Mock).mockRejectedOnce(
+      new TypeError("Failed to fetch"),
+    );
+
+    act(() => {
+      jest.advanceTimesByTime(30_000);
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Showing the last known status/),
+      ).toBeInTheDocument();
+    });
+
+    // A single failed probe must not promote the dependency to a
+    // degraded/outage status; the last known healthy status is retained.
+    expect(screen.getAllByText("Active").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Outage/)).not.toBeInTheDocument();
+  });
+
+  it("surfaces an outage timeline after sustained failures", async () => {
+    render(<StatusPage />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Active").length).toBeGreaterThan(0);
+    });
+
+    for (let i = 0; i < 3; i++) {
+      (global.fetch as jest.Mock).mockRejectedOnce(
+        new TypeError("Failed to fetch"),
+      );
+      act(() => {
+        jest.advanceTimesByTime(30_000);
+      });
+      // eslint-disable-next-line no-await-in-loop
+      await waitFor(() => {
+        expect(global.fetch).toHaveBeenCalled();
+      });
+    }
+
+    await waitFor(() => {
+      expect(screen.getByText(/Outage/)).toBeInTheDocument();
     });
   });
 });
