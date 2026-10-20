@@ -1,0 +1,18 @@
+{
+  "default_branch": "develop",
+  "branches": [
+    "develop",
+    "origin",
+    "security/issue-287-build-dependency-health-hysteresis-and-outage"
+  ],
+  "parent": {
+    "develop": null,
+    "origin": "develop",
+    "security/issue-287-build-dependency-health-hysteresis-and-outage": "develop"
+  },
+  "order": [
+    "develop",
+    "origin",
+    "security/issue-287-build-dependency-health-hysteresis-and-outage"
+  ]
+}
